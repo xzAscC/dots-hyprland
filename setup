@@ -1,94 +1,198 @@
 #!/usr/bin/env bash
+# ↑ shebang 行：告诉操作系统用 bash 来执行这个脚本
+# 用 env bash 而不是 /bin/bash 是为了更好的跨平台兼容性（不是所有系统的 bash 都在 /bin 下）
+
 cd "$(dirname "$0")"
+# ↑ 切换工作目录到脚本自身所在的目录
+# $0 是脚本自身的路径，dirname 取其目录部分
+# 这样无论你在哪个目录下运行 ./setup，工作目录都会被锁定到脚本所在目录
+
 # Use REPO_ROOT instead of base - when scripts are sourced they do not need export to inherit vars
 REPO_ROOT="$(pwd)"
+# ↑ 把当前目录的绝对路径存入 REPO_ROOT 变量
+# 后续被 source 引入的脚本可以通过 $REPO_ROOT 找到仓库根目录
+# 注释的含义：用 source 引入的脚本会自动继承当前 shell 的变量，不需要 export
+
 source ./sdata/lib/environment-variables.sh
+# ↑ 引入环境变量定义（比如颜色代码 STY_CYAN、STY_RST 等）
+
 source ./sdata/lib/functions.sh
+# ↑ 引入通用函数（比如 pause、prevent_sudo_or_root、sudo_init_keepalive 等）
+
 source ./sdata/lib/package-installers.sh
+# ↑ 引入包安装相关函数（封装了 pacman/yay/paru 等包管理器的安装命令）
+
 source ./sdata/lib/dist-determine.sh
+# ↑ 引入发行版检测逻辑（判断当前系统是 Arch/Debian/Fedora 等）
+# 检测结果会影响后续安装哪些依赖包
 
 prevent_sudo_or_root
+# ↑ 防止以 root 用户或通过 sudo 运行此脚本
+# Hyprland 的用户级配置不应以 root 身份操作，否则会导致文件权限问题
+
 set -e
+# ↑ 开启严格模式：任何命令返回非零退出码时，脚本立即终止
+# 防止错误被静默忽略，导致后续步骤在错误状态下继续执行
 
 #####################################################################################
+# ↑ 纯装饰分隔线
+
 showhelp_global(){
+# ↑ 定义一个显示全局帮助信息的函数
+
 printf "${STY_CYAN}NOTE:
   The old \"./install.sh\"   is now \"./setup install\"
   The old \"./update.sh\"    is now \"./setup exp-update\"
   The old \"./uninstall.sh\" is now \"./setup uninstall\"${STY_RST}
+# ↑ 打印旧命令到新命令的映射提示，方便老用户过渡
+# ${STY_CYAN} 是青色前景色控制码，${STY_RST} 重置颜色
 
 [$0]: Handle setup for illogical-impulse.
+# ↑ $0 展开为脚本名，显示用法标题
+# illogical-impulse 是这个 Hyprland dotfiles 项目的名称
 
 Syntax:
   $0 <subcommand> [OPTIONS]...
+# ↑ 说明调用语法：脚本名 + 子命令 + 可选参数
 
 Subcommands:
   install        (Re)Install/Update illogical-impulse.
-                 Note: To update to the latest, manually run \"git stash && git pull\" first.
+                  Note: To update to the latest, manually run \"git stash && git pull\" first.
+  # ↑ 完整安装/重装，提示更新前要先 git pull 拉取最新代码
   install-deps   Run the install step \"1. Install dependencies\"
+  # ↑ 仅执行安装的第 1 步：安装系统依赖包
   install-setups Run the install step \"2. Setup for permissions/services etc\"
+  # ↑ 仅执行安装的第 2 步：配置权限、systemd 服务等
   install-files  Run the install step \"3. Copying config files\"
+  # ↑ 仅执行安装的第 3 步：复制配置文件到 ~/.config 等目标位置
   resetfirstrun  Reset firstrun state.
+  # ↑ 重置首次运行状态标记，让下次运行时重新执行初始化流程
   uninstall      Uninstall illogical-impulse.
+  # ↑ 卸载，移除已安装的配置文件和设置
 
   exp-update     (Experimental) Update illogical-impulse without fully reinstall.
+  # ↑ 实验性功能：不完整重装的增量更新方式
   exp-merge      (Experimental) Merge upstream changes with local configs using git rebase.
+  # ↑ 实验性功能：用 git rebase 合并上游仓库变更和本地自定义配置
 
   virtmon        (For dev only) Create virtual monitors for testing multi-monitors.
+  # ↑ 开发者专用：创建虚拟显示器，用于测试多屏幕布局
   checkdeps      (For dev only) Check whether pkgs exist in AUR or repos of Arch.
+  # ↑ 开发者专用：检查依赖包在 AUR 或 Arch 官方仓库中是否存在
 
   help           Show this help message.
+  # ↑ 显示本帮助信息
 
 For each <subcommand>, use -h for details:
   $0 <subcommand> -h
+# ↑ 每个子命令还支持 -h 查看该子命令的详细用法
 
 ${STY_BOLD}${STY_CYAN}Access ${STY_UNDERLINE}https://ii.clsty.link${STY_RST} ${STY_BOLD}${STY_CYAN}for documentation about illogical-impulse.${STY_RST}
+# ↑ 加粗青色文字，带下划线的链接，引导用户查看完整文档
 "
 }
+# ↑ showhelp_global 函数定义结束
+
 case $1 in
+# ↑ case 语句：根据第一个参数 $1（即子命令名称）进行分支匹配
+
   # Global help
   ""|help|--help|-h)showhelp_global;exit;;
+  # ↑ 无参数 / help / --help / -h → 显示全局帮助信息并退出
+  # 双分号 ;; 是 case 语句中每个分支的结束标记
+
   # Correct subcommand
   install|uninstall|exp-update|exp-merge|resetfirstrun|checkdeps|virtmon)
     SUBCMD_NAME=$1
+    # ↑ 将子命令名保存到变量 SUBCMD_NAME
     SUBCMD_DIR=./sdata/subcmd-$1
+    # ↑ 根据子命令名拼接出对应的脚本目录路径
+    # 例如 install → ./sdata/subcmd-install
+    # 每个子命令有自己独立的目录，包含各自的执行脚本
     shift;;
+    # ↑ shift：把参数列表左移一位，$1 被移除，原来的 $2 变成新的 $1
+    # 这样后续的 options.sh 处理的就是子命令的参数，而非子命令名本身
+
   # Correct subcommand but not using ./sdata/subcmd-$1
   install-deps|install-setups|install-files)
     SUBCMD_NAME=$1
     SUBCMD_DIR=./sdata/subcmd-install
+    # ↑ 这三个子命令复用 install 目录的脚本
+    # 因为它们本质上是 install 的子步骤（deps/setups/files 分别对应步骤 1/2/3）
     shift;;
+
   # Wrong subcommand
   *)printf "${STY_RED}Unknown subcommand \"$1\".${STY_RST}\n";showhelp_global;exit 1;;
+  # ↑ 兜底分支 * 匹配所有未识别的输入
+  # 红色打印错误信息 → 显示帮助 → 以退出码 1 退出（非零表示错误）
 esac
 #####################################################################################
+
 if [[ -f "${SUBCMD_DIR}/options.sh" ]];
   then source "${SUBCMD_DIR}/options.sh"
 fi
+# ↑ 如果子命令目录下存在 options.sh 文件，就加载它
+# options.sh 通常负责解析该子命令特有的命令行参数（如 -h、--skip-xxx 等）
+
 case ${SUBCMD_NAME} in
+# ↑ 第二层 case：根据子命令名执行不同的业务流程
+
   install)
+    # ---- 完整安装流程（包含全部 4 个阶段）----
+
     for function in ${print_os_group_id_functions[@]}; do
       $function
     done
+    # ↑ 遍历 print_os_group_id_functions 数组中的所有函数名并逐一调用
+    # 这些函数用来打印当前操作系统信息、用户组 ID 等（让用户确认环境是否正确）
+
     pause
+    # ↑ 暂停脚本执行，等待用户按回车键继续
+    # 给用户一个查看信息、确认环境的机会
+
     # Initialize sudo keepalive for the entire install process
     sudo_init_keepalive
+    # ↑ 初始化 sudo 权限保活机制
+    # 安装过程可能持续很长时间，sudo 会话可能超时过期导致需要重新输密码
+    # 这个函数会在后台启动一个子进程，定期执行 sudo -v 刷新时间戳
+
     # Set trap to cleanup when this subcommand exits
     trap sudo_stop_keepalive EXIT INT TERM
+    # ↑ 设置信号捕获（trap）：当脚本收到以下信号时，自动执行 sudo_stop_keepalive
+    # EXIT = 正常退出（0）或执行完毕时
+    # INT  = 用户按 Ctrl+C 发送的中断信号 (SIGINT)
+    # TERM = kill 命令发送的终止信号 (SIGTERM)
+    # 确保无论如何退出，后台的 sudo 保活进程都能被正确清理
+
     if [[ "${SKIP_ALLGREETING}" != true ]]; then
       source ${SUBCMD_DIR}/0.greeting.sh
     fi
+    # ↑ 如果环境变量 SKIP_ALLGREETING 不等于 true，就加载欢迎/说明脚本
+    # 通过设置 SKIP_ALLGREETING=true 可以跳过欢迎信息（用于自动化/脚本调用）
+
     if [[ "${SKIP_ALLDEPS}" != true ]]; then
       source ${SUBCMD_DIR}/1.deps-router.sh
     fi
+    # ↑ 如果没有设置跳过依赖安装，就加载依赖安装路由脚本
+    # router 会根据 dist-determine.sh 检测到的发行版，路由到对应的依赖安装逻辑
+
     if [[ "${SKIP_ALLSETUPS}" != true ]]; then
       source ${SUBCMD_DIR}/2.setups.sh
     fi
+    # ↑ 如果没有设置跳过系统配置，就加载系统配置脚本
+    # 配置内容包括：用户组权限、systemd 服务启用、系统设置等
+
     if [[ "${SKIP_ALLFILES}" != true ]]; then
       source ${SUBCMD_DIR}/3.files.sh
     fi
+    # ↑ 如果没有设置跳过文件复制，就加载配置文件复制脚本
+    # 将仓库中的 Hyprland/Waybar/Rofi 等配置文件复制到 ~/.config 等目标位置
     ;;
+
   install-deps)
+    # ---- 仅安装依赖包（install 的第 1 步）----
+    # 结构与 install 类似，但只执行 print_os_info + 依赖安装
+
     for function in ${print_os_group_id_functions[@]}; do
       $function
     done
@@ -101,7 +205,11 @@ case ${SUBCMD_NAME} in
       source ${SUBCMD_DIR}/1.deps-router.sh
     fi
     ;;
+
   install-setups)
+    # ---- 仅执行系统配置（install 的第 2 步）----
+    # 配置权限、systemd 服务、用户组等，不涉及包安装和文件复制
+
     for function in ${print_os_group_id_functions[@]}; do
       $function
     done
@@ -114,17 +222,28 @@ case ${SUBCMD_NAME} in
       source ${SUBCMD_DIR}/2.setups.sh
     fi
     ;;
+
   install-files)
+    # ---- 仅复制配置文件（install 的第 3 步）----
+    # 将 dotfiles 复制到用户目录，不需要 sudo 权限
+
     for function in ${print_os_group_id_functions[@]}; do
       $function
     done
     pause
+    # ↑ 注意：install-files 没有调用 sudo_init_keepalive
+    # 因为复制用户级配置文件通常不需要 sudo 权限
     if [[ "${SKIP_ALLFILES}" != true ]]; then
       source ${SUBCMD_DIR}/3.files.sh
     fi
     ;;
+
   *)
+    # ---- 其他所有子命令（uninstall, exp-update, exp-merge, resetfirstrun, checkdeps, virtmon）----
     source ${SUBCMD_DIR}/0.run.sh
+    # ↑ 直接加载对应子命令目录下的 0.run.sh 主执行脚本
+    # 每个子命令目录（如 subcmd-uninstall/）都有自己的 0.run.sh 作为入口
     exit
+    # ↑ 执行完后立即退出，不进入安装流程
     ;;
 esac
